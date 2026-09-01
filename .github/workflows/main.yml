@@ -1,0 +1,418 @@
+name: deploy simple CI/CD
+#GitHubActions　Web上で表示される名前を設定　必須ではないが管理しやすくするために設定する
+
+on:
+  push:
+    branches: ["Test"] #main Test検証
+#起動契機の設定　on:は必須　ブランチ名　mainの場合に起動する
+#意図しないCI/CD(検証・テストそしてデプロイ)を防ぐため
+#mainは固定ではない　あくまでもデフォルト名　環境によって違うので確認する癖をつける 　
+#git push origin main この環境はoriginというリモートリポジトリのmainブランチにpushする　originも固定ではない
+#ブランチ確認コマンド：git branch　　リモートリポジトリ確認コマンド：git remote -v
+
+env:
+#env環境変数を定義する
+  AWS_REGION: ap-northeast-1
+  ECS_CLUSTER: simple-cicd-cluster
+  ECS_SERVICE: simple-cicd-service
+  ECS_TASK_DEFINITION: .aws/task-definition.json
+  #このmain.yml内で使用するAWSサービス関連の環境変数の設定
+  #リージョン　ECSクラスター名 ECSサービス
+  #.awsディレクトリ内のtask-definition.jsonを使用する
+
+  #env→コマンドやActionの実行時に環境変数として値を渡す
+  #arg→--build-arg → Dockerイメージのビルド時に値を渡す
+
+  #'EC2’→AWSでコンテナを実行・管理するためのサービス
+  #ECR→Dockerイメージを保管
+
+
+permissions:
+  contents: read
+# GitHub Actionsに与える権限を設定
+# contents: read → リポジトリの内容を読み取り可能
+# 必要以上の権限を与えないため、基本的にreadで設定
+
+jobs:
+  web-test-build-image:
+    name: web Cntainer - Test and Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+# jobs
+# → GitHub Actionsで実行するJob（処理）を定義
+
+# web-test-build-image
+# → Jobの識別名
+# → Webコンテナのテスト・ビルドを行うJob
+
+# name ---web Cntainer - Test and Build---
+# → GitHub ActionsのWeb画面に表示されるJob名
+
+# runs-on
+# → GitHub ActionsのJobを実行する環境を指定
+# → Ubuntu 24.04を使用
+
+# timeout-minutes
+# → Jobの最大実行時間　
+# → 検証・テスト・ビルドが10分を超えた場合、強制終了　
+
+# GitHub Actions上の作業場所をwebにする
+# リポジトリのルート
+# docker-simple-cicd-demo/
+#     ↓
+#    web/
+
+    steps:
+      - uses: actions/checkout@v3
+      # GitHub公式のcheckout Actionを使用
+      # GitHubリポジトリの資材をGitHub Actionsの実行環境に取得
+      # @v3 → checkout Actionのバージョン3
+      #####後続でcheckout Actionが登場するがバージョン違い　統一しない意図が不明#######
+
+      - name: Build an Image and Run Tests
+        run: docker image build --target production -t temp_web_image_name:latest  --build-arg REACT_APP_API_SERVER=/api .
+        # name
+        # → GitHub ActionsのWeb画面に表示されるStep名
+        # working-directory: web
+        # → GitHub Actions上の作業場所をwebに設定済み
+        # docker image build
+        # → Dockerイメージをビルド
+        # . → web/をDockerのビルドコンテキストとして使用
+        # --target production
+        # → Dockerfileのproductionステージを対象にビルド
+        # -t temp_web_image_name:latest
+        # → 作成したイメージにタグを付ける
+        # --build-arg REACT_APP_API_SERVER=/api
+        # → イメージのビルド時に値を渡す
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      # name
+      # → GitHub ActionsのWeb上に表示されるStep名
+
+      # uses
+      # → GitHub ActionsのAWS認証設定用Actionを使用
+      # → @v1 = バージョン1
+
+      # with
+      # → Actionに渡す設定値を指定
+
+      # secrets.AWS_ACCESS_KEY_ID
+      # → GitHubのRepository secretsに登録したAWS_ACCESS_KEY_IDを読み込む
+      # → AWSへの認証に使用
+
+      # secrets.AWS_SECRET_ACCESS_KEY
+      # → GitHubのRepository secretsに登録したAWS_SECRET_ACCESS_KEYを読み込む
+      # → AWSへの認証に使用
+
+      # Repository secrets
+      # → AWSなどの接続・操作に必要な機密情報を
+      #   main.ymlに直接記載せず、GitHub側で安全に管理するために使用
+
+      # env.AWS_REGION
+      # → このWorkflowのenvで設定したAWS_REGIONを読み込む
+      # → 今回はap-northeast-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        # name
+        # → GitHub ActionsのWeb画面に表示されるStep名
+        # id
+        # → このStepを後のStepから参照するための識別名
+        # → login-ecrという名前は固定ではなく任意
+
+        # uses
+        # → Amazon ECRへログインするための既存Actionを使用
+        # → @v1 = amazon-ecr-login Actionのバージョン1
+        # ※この前のStepでAWS認証情報を設定済み
+        # → AWS_ACCESS_KEY_ID
+        # → AWS_SECRET_ACCESS_KEY
+        # → これらを使用してAWSを操作できる状態にしている
+
+        # amazon-ecr-login
+        # → AWS認証情報を利用してAmazon ECRへログイン
+        # → ECRへDockerイメージをPushできる状態にする
+
+        # outputs.registry
+        # → このActionが実行時に取得・出力するECRのRegistry情報
+        # → 後のStepから steps.login-ecr.outputs.registry で取得できる
+
+
+      - name: Push the image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.AWS_ECR_WEB_SERVER_REPOSITORY }}
+          # name
+          # → GitHub ActionsのWeb画面に表示されるStep名
+          #
+          # env
+          # → このStepで使用する環境変数を定義
+          #
+          # ECR_REGISTRY
+          # → 前の「login-ecr」Stepのoutputs.registryから
+          #   ECRのRegistry情報を取得
+          #
+          # Registry
+          # → Dockerイメージを保管するECRの住所のようなもの
+          # → 今回：
+          #   749185460978.dkr.ecr.ap-northeast-1.amazonaws.com
+          #
+          # → AWSコンソール
+          #   ECR → プライベートレジストリ
+          #   などから確認できる
+          #
+          # ECR_REPOSITORY
+          # → GitHub Repository secretsに登録した
+          #   AWS_ECR_WEB_SERVER_REPOSITORYの値を取得
+          # → 今回：
+          #   simple-cicd-web
+          #
+          # ECR_REGISTRY
+          # → 「どのECR Registryへ送るか」
+          #
+          # ECR_REPOSITORY
+          # → 「そのRegistry内のどのRepositoryへ送るか」
+
+        run: |
+          docker image tag temp_web_image_name:latest $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+        # 前工程でビルドしたDockerイメージ
+        # temp_web_image_name:latest
+        # ECRへPushするための名前（タグ）を付ける
+        # 今回は最終的に、749185460978.dkr.ecr.ap-northeast-1.amazonaws.com/simple-cicd-web:latestという名前になる
+        # ※イメージ自体を新しく作成しているわけではない
+              
+  api-test-build-image:
+    name: API Container - Test and Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: api
+  #GitHubActionsで実施するjobを定義　API部門
+  #GitHubActionsのWeb上に表示される名前
+  #ubuntu24.04を使用して処理する
+  #処理が10分で完了しなかった場合、10分を過ぎた時点で強制終了する
+  #処理するデフォルトディレクトリはapi
+    
+    steps:
+      - uses: actions/checkout@v3
+      # GitHub公式のcheckout Actionを使用
+      # GitHubリポジトリの資材をGitHub Actionsの実行環境に取得
+      # @v3 → checkout Actionのバージョン3 
+
+      - name: Build an Image and Run tests
+        run: |
+          docker image build --target production -t temp_api_image_name:latest .
+        #API用のDockerfileのproductionステージを「temp_api_image_name:latest」というタグを付けてビルドする。　現在ディレクトリがビルドコンテキスト
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          # aws-access-key-id
+          # → GitHub Repository Secretsに登録した
+          #   AWS_ACCESS_KEY_IDの値を読み込む
+
+          # aws-secret-access-key
+          # → GitHub Repository Secretsに登録した
+          #   AWS_SECRET_ACCESS_KEYの値を読み込む
+
+          # secrets
+          # → GitHub Repository Secretsに保存した機密情報を取得するための指定
+          # → Secretsに登録した値は暗号化されて管理される
+          # → main.ymlに認証情報を直接記載せずに済むため、
+          #   AWSのアクセスキーなどの機密情報を安全に管理できる
+
+          # aws-region
+          # → Workflowのenvで設定したAWS_REGIONの値を読み込む
+          # → 今回は「ap-northeast-1」
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        # id: login-ecr
+        # → このStepに「login-ecr」という識別名を付ける
+        # → 後のStepから、このStepの実行結果（outputs）を参照するために使用
+        # → login-ecrという名前は任意
+
+        # uses: aws-actions/amazon-ecr-login@v1
+        # → Amazon ECRへログインするためのActionを使用
+        # → @v1はActionのバージョン1
+
+        # この前のStepでAWSの認証情報を設定済み
+        # → AWS_ACCESS_KEY_ID
+        # → AWS_SECRET_ACCESS_KEY
+        # → これらを利用してAWSへアクセスできる状態
+
+        # amazon-ecr-login Action
+        # → AWSの認証情報を利用してECRへのログイン処理を行う
+        # → DockerからECRへPushできる状態にする
+
+        # このActionは実行結果としてRegistry情報などをoutputsとして提供する
+        # amazon-ecr-loginということでAWSサービスにログインするためのユーザやパスワードだけ取得だと思っていたがレジストリも取得してくれる
+      - name: push the image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.AWS_ECR_API_SERVER_REPOSITORY }}
+        run: |
+          docker image tag temp_api_image_name:latest $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        # ECR_REGISTRY
+        # → 前の「login-ecr」Stepのoutputs.registryから
+        #   ECRのRegistry情報を取得
+        # → 今回：
+        #   749185460978.dkr.ecr.ap-northeast-1.amazonaws.com
+
+        # ECR_REPOSITORY
+        # → GitHub Repository Secretsに登録した
+        #   AWS_ECR_API_SERVER_REPOSITORYの値を読み込む
+        # → 今回：
+        #   simple-cicd-api
+
+        # docker image tag
+        # → temp_api_image_name:latestという名前のDockerイメージに
+        #   ECRへPushするための新しい名前を付ける
+        # → イメージ自体を新しく作成しているわけではない
+        #
+        # 今回：
+        # temp_api_image_name:latest
+        #        ↓
+        # 749185460978.dkr.ecr.ap-northeast-1.amazonaws.com/simple-cicd-api:latest
+
+        # docker push
+        # → ECR用の名前を付けたDockerイメージを
+        #   Amazon ECRへPushする
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-24.04
+    needs: [web-test-build-image, api-test-build-image]
+    # needs
+    # → このJobを実行する前に、指定したJobの完了を待つ
+    # → 今回は
+    #   web-test-build-image
+    #   api-test-build-image
+    #   の両方が完了してからdeployを実行する
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      #GitHubリポジトリのファイルをGitHub Actionsの実行環境に取得する
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Fill in the new image ID in the Amazon ECS task definition for web
+        id: render-web-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          container-name: web
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.AWS_ECR_WEB_SERVER_REPOSITORY }}
+        # image
+        # → ECSのTask Definitionで使用するDockerイメージを指定
+
+        # steps.login-ecr.outputs.registry
+        # → 前の「login-ecr」Stepのoutputs.registryから
+        #   ECRのRegistry情報を取得
+        # → 今回：
+        #   749185460978.dkr.ecr.ap-northeast-1.amazonaws.com
+
+        # secrets.AWS_ECR_WEB_SERVER_REPOSITORY
+        # → GitHub Repository Secretsに登録した
+        #   ECR Repository名を取得
+        # → 今回：
+        #   simple-cicd-web
+
+        # RegistryとRepositoryを「/」でつなげる
+        # → ECR上のDockerイメージの場所を指定する
+        # → 今回：
+        #   749185460978.dkr.ecr.ap-northeast-1.amazonaws.com/simple-cicd-web
+
+      - name: Fill in the new image ID in the Amazon ECS task definition for api
+        id: render-api-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.render-web-task-def.outputs.task-definition }}
+          container-name: api
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.AWS_ECR_API_SERVER_REPOSITORY }}
+        # uses: aws-actions/amazon-ecs-render-task-definition@v1
+        # → ECSのTask Definitionで使用するDockerイメージを更新するAction
+        # → 今回ECRへPushしたAPI用イメージを指定する
+
+        # task-definition
+        # → 前の「render-web-task-def」Stepで更新された
+        #   Task Definitionを受け取る
+        # → Web側で更新したTask Definitionに、さらにAPI側の設定を反映する
+
+        # container-name: api
+        # → Task Definition内にある「api」という名前のコンテナを指定
+        # → コンテナそのものを新しく作成するわけではない
+
+        # image
+        # → 前の「login-ecr」Stepから取得したRegistryと
+        #   GitHub Repository Secretsから取得したAPI用Repositoryを組み合わせる
+        # → ECRに保存したAPI用Dockerイメージを指定する
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-api-task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+      # uses
+      # → ECSへTask DefinitionをデプロイするActionを使用
+      # → aws-actionsが提供する
+      #   amazon-ecs-deploy-task-definitionのv2を使用
+
+      # task-definition
+      # → 前の「render-api-task-def」Stepで更新された
+      #   Task Definitionを使用
+      # → Web・APIの新しいDockerイメージが設定されたTask Definition
+
+      # service
+      # → デプロイ先のECS Serviceを指定
+      # → envで設定したECS_SERVICEの値を使用
+
+      # cluster
+      # → デプロイ先のECS Clusterを指定
+      # → envで設定したECS_CLUSTERの値を使用
+
+      # wait-for-service-stability
+      # → trueの場合、デプロイ後にECS Serviceが安定するまで待つ
+      # → 新しいコンテナが正常に起動するか確認してから次へ進む
+
+
+# Web container Build/Test
+## Get Source
+## Build/Test
+## Docker Image Build
+## Login AWS
+## Push image to ECE
+
+#Deploy
+## Get Source
+## Login AWS
+## Edit Task Definition
+## Deploy
