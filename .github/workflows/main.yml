@@ -3,7 +3,7 @@ name: deploy simple CI/CD
 
 on:
   push:
-    branches: ["Test"] #main Test検証
+    branches: ["master"] #main Test検証
 #起動契機の設定　on:は必須　ブランチ名　mainの場合に起動する
 #意図しないCI/CD(検証・テストそしてデプロイ)を防ぐため
 #mainは固定ではない　あくまでもデフォルト名　環境によって違うので確認する癖をつける 　
@@ -416,3 +416,4 @@ jobs:
 ## Login AWS
 ## Edit Task Definition
 ## Deploy
+#test
