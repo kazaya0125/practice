@@ -328,7 +328,7 @@ jobs:
         with:
           task-definition: ${{ env.ECS_TASK_DEFINITION }}
           container-name: web
-          image: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.AWS_ECR_WEB_SERVER_REPOSITORY }}
+          image: ${{ steps.login-ecr.outputs.registry }}/web #${{ secrets.AWS_ECR_WEB_SERVER_REPOSITORY }}
         # image
         # → ECSのTask Definitionで使用するDockerイメージを指定
 
@@ -355,7 +355,7 @@ jobs:
         with:
           task-definition: ${{ steps.render-web-task-def.outputs.task-definition }}
           container-name: api
-          image: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.AWS_ECR_API_SERVER_REPOSITORY }}
+          image: ${{ steps.login-ecr.outputs.registry }}/api #${{ secrets.AWS_ECR_API_SERVER_REPOSITORY }}
         # uses: aws-actions/amazon-ecs-render-task-definition@v1
         # → ECSのTask Definitionで使用するDockerイメージを更新するAction
         # → 今回ECRへPushしたAPI用イメージを指定する
